@@ -1,0 +1,19 @@
+'use strict';
+
+const { send, methodNotAllowed } = require('../lib/server/http');
+const { PLANS } = require('../lib/server/plans');
+
+module.exports = function handler(req, res) {
+  if (req.method !== 'GET') return methodNotAllowed(res, ['GET']);
+  const hasSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const hasBilling = hasSupabase && !!(process.env.TOSS_SECRET_KEY && process.env.TOSS_CLIENT_KEY);
+  const hasEncryption = !!process.env.INTEGRATION_ENCRYPTION_KEY;
+  return send(res, 200, {
+    supabaseUrl: process.env.SUPABASE_URL || null,
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY || null,
+    tossClientKey: process.env.TOSS_CLIENT_KEY || null,
+    backendReady: hasBilling && hasEncryption,
+    integrationsReady: hasSupabase && hasEncryption,
+    plans: Object.fromEntries(Object.entries(PLANS).map(([key, value]) => [key, { amount: value.amount, label: value.publicLabel, days: value.days }])),
+  });
+};
