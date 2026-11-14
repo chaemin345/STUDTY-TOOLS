@@ -1,0 +1,17 @@
+{
+  "name": "STUDTY TOOLS",
+  "version": "2.0.0",
+  "entry": "index.html",
+  "architecture": {
+    "frontend": "Vanilla HTML, CSS, JavaScript",
+    "backend": "Vercel Node.js Functions",
+    "auth_database": "Supabase Auth + PostgREST",
+    "payments": "Toss Payments SDK v2 + server-side confirmation",
+    "api_key_storage": "AES-256-GCM encrypted Supabase records"
+  },
+  "features": [
+    "subjects", "tasks", "schedule", "focus-timer", "analytics", "json-backup",
+    "free-pro-entitlements", "toss-checkout", "api-integrations", "ai-study-plans"
+  ],
+  "tests": ["tests/validate_app.py", "tests/security.test.js"]
+}
