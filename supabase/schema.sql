@@ -1,11 +1,11 @@
--- STUDTY TOOLS billing and encrypted API credential tables.
+-- STUDTY TOOLS billing, encrypted API credentials, and AI usage quotas.
 -- Run once in Supabase SQL Editor. Client access is intentionally disabled;
 -- Vercel server functions use the Service Role key after validating the user's JWT.
 
 create table if not exists public.billing_orders (
   order_id text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
-  plan text not null check (plan in ('monthly', 'yearly')),
+  plan text not null check (plan in ('monthly', 'yearly', 'max_monthly')),
   amount integer not null check (amount > 0),
   status text not null default 'pending' check (status in ('pending', 'paid', 'failed', 'canceled')),
   payment_key text unique,
@@ -16,7 +16,7 @@ create table if not exists public.billing_orders (
 
 create table if not exists public.subscriptions (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  plan text not null check (plan in ('monthly', 'yearly')),
+  plan text not null check (plan in ('monthly', 'yearly', 'max_monthly')),
   status text not null check (status in ('active', 'expired', 'canceled')),
   starts_at timestamptz not null,
   expires_at timestamptz not null,
@@ -42,3 +42,28 @@ alter table public.api_credentials enable row level security;
 -- No anon/authenticated policies are added. Only server-side Service Role access is allowed.
 create index if not exists billing_orders_user_created_idx on public.billing_orders(user_id, created_at desc);
 create index if not exists api_credentials_user_idx on public.api_credentials(user_id);
+
+-- Monthly AI assistant usage counters (one row per user/month).
+create table if not exists public.ai_usage (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  month text not null check (month ~ '^\\d{4}-\\d{2}$'),
+  count integer not null default 0 check (count >= 0),
+  primary key (user_id, month)
+);
+alter table public.ai_usage enable row level security;
+create index if not exists ai_usage_user_month_idx on public.ai_usage(user_id, month);
+
+-- Atomic monthly quota increment prevents parallel requests bypassing plan limits.
+create or replace function public.consume_ai_quota(p_user_id uuid, p_month text, p_limit integer)
+returns integer language plpgsql security definer set search_path = public as $$
+declare new_count integer;
+begin
+  insert into public.ai_usage(user_id, month, count) values (p_user_id, p_month, 1)
+  on conflict (user_id, month) do update set count = public.ai_usage.count + 1
+  where public.ai_usage.count < p_limit
+  returning count into new_count;
+  return coalesce(new_count, 0);
+end;
+$$;
+revoke all on function public.consume_ai_quota(uuid, text, integer) from public, anon, authenticated;
+grant execute on function public.consume_ai_quota(uuid, text, integer) to service_role;
