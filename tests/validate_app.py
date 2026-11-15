@@ -68,7 +68,7 @@ def static_checks() -> str:
 
     # Backend security invariants.
     schema = (ROOT / "supabase" / "schema.sql").read_text(encoding="utf-8")
-    rls_tables = set(re.findall(r"alter table public\\.([a-z_]+) enable row level security", schema, flags=re.I))
+    rls_tables = set(re.findall(r"alter table public\.([a-z_]+) enable row level security", schema, flags=re.I))
     expected_rls_tables = {
         "billing_orders", "subscriptions", "api_credentials",
         "ai_usage", "user_workspaces", "admin_audit_logs",
