@@ -31,14 +31,15 @@ def static_checks() -> str:
     assert 'id="blockForm"' in source
     assert 'id="focusStart"' in source
     assert 'id="page-pro"' in source
-    assert 'id="checkoutModal"' in source and 'id="checkoutPayBtn"' in source
     assert 'id="authForm"' in source and 'id="providerList"' in source
     assert 'id="generateAiPlan"' in source
     assert 'data-page="pro"' in source
     assert 'id="exportData"' in source and 'id="importDataBtn"' in source
     assert "function normalizeData(value)" in source
     assert "localStorage.setItem(STORAGE_KEY" in source
-    assert "requestPayment({orderId:order.orderId" in source
+    assert "TossPayments" not in source and "requestPayment" not in source
+    assert "/api/billing/create-order" not in source and "/api/toss/confirm" not in source
+    assert 'id="checkoutModal"' not in source and 'id="checkoutPayBtn"' not in source
     assert "TOSS_SECRET_KEY" not in source, "Toss secret key must never be present in frontend HTML"
     assert "SUPABASE_SERVICE_ROLE_KEY" not in source, "Supabase service role key must never be present in frontend HTML"
     assert "<title>FORM" not in source and ">FORM</div>" not in source, "Old product branding remains in the UI"
@@ -70,13 +71,16 @@ def static_checks() -> str:
     schema = (ROOT / "supabase" / "schema.sql").read_text(encoding="utf-8")
     rls_tables = set(re.findall(r"alter table public\.([a-z_]+) enable row level security", schema, flags=re.I))
     expected_rls_tables = {
-        "billing_orders", "subscriptions", "api_credentials",
-        "ai_usage", "user_workspaces", "admin_audit_logs",
+        "subscriptions", "api_credentials", "ai_usage",
+        "user_workspaces", "admin_audit_logs",
     }
     assert rls_tables == expected_rls_tables, (
         f"RLS coverage mismatch: expected {sorted(expected_rls_tables)}, got {sorted(rls_tables)}"
     )
-    assert "SUPABASE_SERVICE_ROLE_KEY" in (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "SUPABASE_SECRET_KEY" in readme
+    assert "결제" in readme and "아직 구현하지 않" in readme
+    assert not any("TOSS_" in line for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines())
     assert (ROOT / ".env.example").exists()
     assert (ROOT / "terms.html").exists() and (ROOT / "privacy.html").exists()
 
@@ -177,9 +181,10 @@ def browser_checks() -> None:
         assert page.locator("#pageTitle").inner_text() == "플랜", "Plan navigation did not render its page heading"
         assert page.locator("#proStatusBadge").inner_text() == "FREE", "Anonymous browser session should remain on the Free plan"
         assert page.locator("#generateAiPlan").is_disabled(), "AI study plan button should be disabled for Free users"
-        assert page.locator("#monthlyPlanCard").get_by_text(re.compile(r"₩\s*4,900")).count() == 1, "Monthly plan price is missing or changed"
-        assert page.locator("#yearlyPlanCard").get_by_text(re.compile(r"₩\s*49,000")).count() == 1, "Yearly plan price is missing or changed"
-        assert page.locator("#checkoutModal").is_hidden(), "Checkout modal should remain closed before purchase"
+        assert page.locator("#monthlyPlanCard").get_by_text("준비 중").count() == 2, "Monthly Pro plan should be marked as coming soon"
+        assert page.locator("#yearlyPlanCard").get_by_text("준비 중").count() == 2, "Yearly Pro plan should be marked as coming soon"
+        assert page.locator(".pro-max-card").get_by_text("준비 중").count() == 2, "Pro Max should be marked as coming soon"
+        assert page.locator(".plan-card:not(:first-child) .plan-button:disabled").count() == 3, "Paid plan purchase buttons must remain disabled"
 
         # Backup download should be available.
         page.locator("[data-page='settings']").click()
@@ -202,83 +207,15 @@ def browser_checks() -> None:
 
 
 
-def checkout_mock_checks() -> None:
-    """Exercise the Pro checkout UI against mocked provider SDKs; no real charge is made."""
-    import json
-    from datetime import datetime, timedelta, timezone
-    from playwright.sync_api import sync_playwright
-
-    html = HTML_PATH.read_text(encoding="utf-8").replace("<head>", '<head><base href="https://studty.test/">', 1)
-    storage_adapter = r"""window.__mockLocalStorage = {
-      _data: {}, getItem(key) { return this._data[key] ?? null; },
-      setItem(key, value) { this._data[key] = String(value); }, removeItem(key) { delete this._data[key]; }, clear() { this._data = {}; }
-    };"""
-    html = re.sub(
-        r"(<script>)(.*?)(</script>)",
-        lambda m: m.group(1) + storage_adapter + "\n" + m.group(2).replace("localStorage", "window.__mockLocalStorage") + m.group(3),
-        html, count=1, flags=re.S,
-    )
-    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
-    sdk_supabase = r"""window.supabase = { createClient: () => ({ auth: {
-      getSession: async () => ({ data: { session: { access_token: 'mock-access', user: { id: '7a5b9d19-9b64-42ea-9e82-33bbf5f3b9c1', email: 'tester@example.test' } } } }),
-      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
-      signOut: async () => ({ error: null })
-    } }) };"""
-    sdk_toss = r"""window.TossPayments = () => ({ widgets: () => ({
-      setAmount: async (amount) => { window.__widgetAmount = amount; },
-      renderPaymentMethods: async () => { document.querySelector('#toss-payment-methods').textContent = 'Mock payment methods'; },
-      renderAgreement: async () => { document.querySelector('#toss-terms').textContent = 'Mock payment agreement'; },
-      requestPayment: async (request) => { window.__paymentRequest = request; }
-    }) });"""
-    config = {"supabaseUrl":"https://supabase.test","supabaseAnonKey":"anon-test","tossClientKey":"test_ck_sample","backendReady":True,"plans":{"monthly":{"amount":4900,"label":"PRO · 30일","days":30},"yearly":{"amount":49000,"label":"PRO · 365일","days":365}}}
-    subscription = {"plan":"pro","subscription":{"plan":"monthly","status":"active","expires_at":expires}}
-
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        page = browser.new_page(viewport={"width":1280,"height":900})
-
-        def route_api(route):
-            url = route.request.url
-            if url.endswith('/api/config'):
-                route.fulfill(status=200, content_type='application/json', body=json.dumps(config, ensure_ascii=False))
-            elif url.endswith('/api/account/me'):
-                route.fulfill(status=200, content_type='application/json', body=json.dumps(subscription, ensure_ascii=False))
-            elif url.endswith('/api/integrations'):
-                route.fulfill(status=200, content_type='application/json', body='{"integrations":[]}')
-            elif url.endswith('/api/billing/create-order'):
-                route.fulfill(status=200, content_type='application/json', body='{"orderId":"STUDTY-TEST-ORDER-0123456789","amount":4900,"orderName":"STUDTY PRO 30일 이용권","days":30}')
-            else:
-                route.continue_()
-
-        page.route('https://studty.test/api/**', route_api)
-        page.route('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0', lambda route: route.fulfill(status=200, content_type='application/javascript', body=sdk_supabase))
-        page.route('https://js.tosspayments.com/v2/standard', lambda route: route.fulfill(status=200, content_type='application/javascript', body=sdk_toss))
-        page.set_content(html, wait_until='domcontentloaded')
-        page.locator("[data-page='pro']").click()
-        page.wait_for_function("document.querySelector('#proStatusBadge').textContent === 'PRO ACTIVE'")
-        assert page.locator('#generateAiPlan').is_enabled()
-        page.locator(".plan-button[data-plan='monthly']").click()
-        page.wait_for_function("document.querySelector('#toss-payment-methods').textContent.includes('Mock payment methods')")
-        page.locator('#checkoutConsent').check()
-        assert page.locator('#checkoutPayBtn').is_enabled()
-        page.locator('#checkoutPayBtn').click()
-        page.wait_for_function("!!window.__paymentRequest")
-        request = page.evaluate("window.__paymentRequest")
-        assert request['orderId'] == 'STUDTY-TEST-ORDER-0123456789'
-        assert request['orderName'] == 'PRO · 30일'
-        assert page.evaluate('window.__widgetAmount.value') == 4900
-        browser.close()
-
 def main() -> int:
     try:
         static_checks()
         print("PASS  HTML structure and required features")
         print("PASS  Frontend and server JavaScript syntax (node --check)")
-        print("PASS  Payment/auth/API security structure")
+        print("PASS  Auth/API security structure; paid checkout disabled")
         browser_checks()
         print("PASS  Browser flow: subject, task, schedule, timer, manual log, backup, Pro gates")
-        checkout_mock_checks()
-        print("PASS  Pro checkout: mocked Supabase session + Toss SDK request (no charge)")
+        print("PASS  Paid plan purchase and payment provider are disabled")
         print("PASS  Mobile viewport smoke test")
         print("All STUDTY TOOLS checks passed.")
         return 0
