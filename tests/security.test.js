@@ -24,3 +24,10 @@ test('plan prices and durations are server-owned', () => {
   assert.equal(PLANS.yearly.amount, 49000);
   assert.equal(PLANS.yearly.days, 365);
 });
+
+test('payment confirmation derives plan duration from server PLANS (covers every sellable plan)', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../api/toss/confirm.js'), 'utf8');
+  assert.ok(!src.includes('PLAN_DAYS'), 'confirm.js must not keep a separate hardcoded duration table');
+  assert.ok(src.includes("PLANS[order.plan]"), 'confirm.js must read durations from plans.js');
+  for (const [key, plan] of Object.entries(PLANS)) assert.ok(plan.days > 0, `${key} needs a positive duration`);
+});

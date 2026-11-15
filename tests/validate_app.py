@@ -68,7 +68,14 @@ def static_checks() -> str:
 
     # Backend security invariants.
     schema = (ROOT / "supabase" / "schema.sql").read_text(encoding="utf-8")
-    assert schema.count("enable row level security") == 3
+    rls_tables = set(re.findall(r"alter table public\.([a-z_]+) enable row level security", schema, flags=re.I))
+    expected_rls_tables = {
+        "billing_orders", "subscriptions", "api_credentials",
+        "ai_usage", "user_workspaces", "admin_audit_logs",
+    }
+    assert rls_tables == expected_rls_tables, (
+        f"RLS coverage mismatch: expected {sorted(expected_rls_tables)}, got {sorted(rls_tables)}"
+    )
     assert "SUPABASE_SERVICE_ROLE_KEY" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert (ROOT / ".env.example").exists()
     assert (ROOT / "terms.html").exists() and (ROOT / "privacy.html").exists()
@@ -115,45 +122,44 @@ def browser_checks() -> None:
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
-            executable_path="/usr/bin/chromium",
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.set_content(html, wait_until="domcontentloaded")
-        assert page.title() == "STUDTY TOOLS"
-        assert page.locator("#pageTitle").inner_text() == "오늘"
+        assert page.title() == "STUDTY TOOLS", f"Unexpected document title: {page.title()!r}"
+        assert page.locator("#pageTitle").inner_text() == "오늘", f"Unexpected initial page heading: {page.locator('#pageTitle').inner_text()!r}"
 
         # Add a subject and verify that it appears in the app selectors.
         page.locator("[data-page='subjects']").click()
         page.locator("#newSubject").fill("물리학")
         page.locator("#subjectForm button[type='submit']").click()
-        assert page.locator("#subjectList").get_by_text("물리학").count() == 1
-        assert page.locator("#taskSubject option").filter(has_text="물리학").count() == 1
-        assert page.locator("#focusSubject option").filter(has_text="물리학").count() == 1
+        assert page.locator("#subjectList").get_by_text("물리학").count() == 1, "New subject was not rendered in subject list"
+        assert page.locator("#taskSubject option").filter(has_text="물리학").count() == 1, "New subject is missing from task selector"
+        assert page.locator("#focusSubject option").filter(has_text="물리학").count() == 1, "New subject is missing from focus selector"
 
         # Create a task and confirm it appears in the task view.
         page.locator("[data-page='tasks']").click()
         page.locator("#taskTitle").fill("미적분 오답 정리")
         page.locator("#taskSubject").select_option(label="물리학")
         page.locator("#taskForm button[type='submit']").click()
-        assert page.locator("#allTaskList").get_by_text("미적분 오답 정리").count() == 1
+        assert page.locator("#allTaskList").get_by_text("미적분 오답 정리").count() == 1, "Task creation did not update task view"
 
         # Create a schedule block and validate it is rendered.
         page.locator("[data-page='schedule']").click()
         page.locator("#blockTitle").fill("운동량 개념 복습")
         page.locator("#blockSubject").select_option(label="물리학")
         page.locator("#blockForm button[type='submit']").click()
-        assert page.locator("#scheduleList").get_by_text("운동량 개념 복습").count() == 1
+        assert page.locator("#scheduleList").get_by_text("운동량 개념 복습").count() == 1, "Schedule block creation did not update schedule view"
 
         # Timer selection and start/pause should update without runtime errors.
         page.locator("[data-page='focus']").click()
         page.locator(".mode-btn[data-mode='15']").click()
-        assert page.locator("#focusTimer").inner_text() == "15:00"
+        assert page.locator("#focusTimer").inner_text() == "15:00", "Selecting 15-minute focus mode did not update the timer"
         page.locator("#focusStart").click()
         time.sleep(1.2)
-        assert page.locator("#focusTimer").inner_text() != "15:00"
+        assert page.locator("#focusTimer").inner_text() != "15:00", "Focus timer did not start counting down"
         page.locator("#focusStart").click()
         page.locator("#focusReset").click()
         assert page.locator("#focusTimer").inner_text() == "15:00"
@@ -162,32 +168,32 @@ def browser_checks() -> None:
         page.locator("#manualMinutes").fill("12")
         page.locator("#manualLog").click()
         page.locator("[data-page='analytics']").click()
-        assert "12분" in page.locator("#historyList").inner_text()
+        assert "12분" in page.locator("#historyList").inner_text(), "Manual study log did not appear in analytics history"
         saved = page.evaluate("window.__mockLocalStorage.getItem('form_study_os_v1')")
-        assert saved and '미적분 오답 정리' in saved and '운동량 개념 복습' in saved
+        assert saved and '미적분 오답 정리' in saved and '운동량 개념 복습' in saved, "Study data was not persisted by the browser storage adapter"
 
         # Pro screen is visible, while paid features remain locked for Free users.
         page.locator("[data-page='pro']").click()
-        assert page.locator("#pageTitle").inner_text() == "Pro · API"
-        assert page.locator("#proStatusBadge").inner_text() == "FREE"
-        assert page.locator("#generateAiPlan").is_disabled()
-        assert page.locator("#monthlyPlanCard").get_by_text("₩4,900").count() == 1
-        assert page.locator("#yearlyPlanCard").get_by_text("₩49,000").count() == 1
-        assert page.locator("#checkoutModal").is_hidden()
+        assert page.locator("#pageTitle").inner_text() == "플랜", "Plan navigation did not render its page heading"
+        assert page.locator("#proStatusBadge").inner_text() == "FREE", "Anonymous browser session should remain on the Free plan"
+        assert page.locator("#generateAiPlan").is_disabled(), "AI study plan button should be disabled for Free users"
+        assert page.locator("#monthlyPlanCard").get_by_text(re.compile(r"₩\s*4,900")).count() == 1, "Monthly plan price is missing or changed"
+        assert page.locator("#yearlyPlanCard").get_by_text(re.compile(r"₩\s*49,000")).count() == 1, "Yearly plan price is missing or changed"
+        assert page.locator("#checkoutModal").is_hidden(), "Checkout modal should remain closed before purchase"
 
         # Backup download should be available.
         page.locator("[data-page='settings']").click()
         with page.expect_download() as download_info:
             page.locator("#exportData").click()
         download = download_info.value
-        assert download.suggested_filename.endswith(".json")
+        assert download.suggested_filename.endswith(".json"), f"Backup download has unexpected filename: {download.suggested_filename!r}"
 
         # Mobile layout remains navigable and does not throw.
         mobile = browser.new_page(viewport={"width": 390, "height": 844})
         mobile.on("pageerror", lambda exc: errors.append(str(exc)))
         mobile.set_content(html, wait_until="domcontentloaded")
-        assert mobile.locator("[data-page='dashboard']").is_visible()
-        assert mobile.locator(".sidebar").is_visible()
+        assert mobile.locator("[data-page='dashboard']").is_visible(), "Dashboard nav is not visible on mobile"
+        assert mobile.locator(".sidebar").is_visible(), "Sidebar is not visible on mobile"
         horizontal_overflow = mobile.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
         assert horizontal_overflow == 0, f"Mobile horizontal overflow: {horizontal_overflow}px"
         browser.close()
@@ -228,7 +234,7 @@ def checkout_mock_checks() -> None:
     subscription = {"plan":"pro","subscription":{"plan":"monthly","status":"active","expires_at":expires}}
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(executable_path="/usr/bin/chromium", headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         page = browser.new_page(viewport={"width":1280,"height":900})
 
         def route_api(route):
@@ -245,7 +251,7 @@ def checkout_mock_checks() -> None:
                 route.continue_()
 
         page.route('https://studty.test/api/**', route_api)
-        page.route('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2', lambda route: route.fulfill(status=200, content_type='application/javascript', body=sdk_supabase))
+        page.route('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0', lambda route: route.fulfill(status=200, content_type='application/javascript', body=sdk_supabase))
         page.route('https://js.tosspayments.com/v2/standard', lambda route: route.fulfill(status=200, content_type='application/javascript', body=sdk_toss))
         page.set_content(html, wait_until='domcontentloaded')
         page.locator("[data-page='pro']").click()

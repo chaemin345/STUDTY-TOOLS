@@ -8,7 +8,8 @@ const { PROVIDERS, validProvider } = require('../lib/server/integrations');
 module.exports = async function handler(req, res) {
   try {
     const user = await requireUser(req);
-    await requirePro(user);
+    // Deleting a stored key must always work, even after Pro has expired.
+    if (req.method !== 'DELETE') await requirePro(user);
     if (req.method === 'GET') {
       const rows = await dbRequest(`api_credentials?user_id=eq.${encodeURIComponent(user.id)}&select=provider,model,updated_at&order=provider.asc`);
       return send(res, 200, { integrations: Array.isArray(rows) ? rows : [] });
