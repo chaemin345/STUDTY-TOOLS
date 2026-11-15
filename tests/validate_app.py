@@ -68,7 +68,14 @@ def static_checks() -> str:
 
     # Backend security invariants.
     schema = (ROOT / "supabase" / "schema.sql").read_text(encoding="utf-8")
-    assert schema.count("enable row level security") == 3
+    rls_tables = set(re.findall(r"alter table public\\.([a-z_]+) enable row level security", schema, flags=re.I))
+    expected_rls_tables = {
+        "billing_orders", "subscriptions", "api_credentials",
+        "ai_usage", "user_workspaces", "admin_audit_logs",
+    }
+    assert rls_tables == expected_rls_tables, (
+        f"RLS coverage mismatch: expected {sorted(expected_rls_tables)}, got {sorted(rls_tables)}"
+    )
     assert "SUPABASE_SERVICE_ROLE_KEY" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert (ROOT / ".env.example").exists()
     assert (ROOT / "terms.html").exists() and (ROOT / "privacy.html").exists()
@@ -245,7 +252,7 @@ def checkout_mock_checks() -> None:
                 route.continue_()
 
         page.route('https://studty.test/api/**', route_api)
-        page.route('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2', lambda route: route.fulfill(status=200, content_type='application/javascript', body=sdk_supabase))
+        page.route('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0', lambda route: route.fulfill(status=200, content_type='application/javascript', body=sdk_supabase))
         page.route('https://js.tosspayments.com/v2/standard', lambda route: route.fulfill(status=200, content_type='application/javascript', body=sdk_toss))
         page.set_content(html, wait_until='domcontentloaded')
         page.locator("[data-page='pro']").click()
