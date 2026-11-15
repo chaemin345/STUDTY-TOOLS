@@ -5,12 +5,14 @@ const { PLANS } = require('../lib/server/plans');
 
 module.exports = function handler(req, res) {
   if (req.method !== 'GET') return methodNotAllowed(res, ['GET']);
-  const hasSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const publicKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+  const serviceKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const hasSupabase = !!(process.env.SUPABASE_URL && publicKey && serviceKey);
   const hasBilling = hasSupabase && !!(process.env.TOSS_SECRET_KEY && process.env.TOSS_CLIENT_KEY);
   const hasEncryption = !!process.env.INTEGRATION_ENCRYPTION_KEY;
   return send(res, 200, {
     supabaseUrl: process.env.SUPABASE_URL || null,
-    supabaseAnonKey: process.env.SUPABASE_ANON_KEY || null,
+    supabaseAnonKey: publicKey || null,
     tossClientKey: process.env.TOSS_CLIENT_KEY || null,
     backendReady: hasBilling && hasEncryption,
     integrationsReady: hasSupabase && hasEncryption,
