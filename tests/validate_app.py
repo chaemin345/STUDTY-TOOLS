@@ -174,7 +174,7 @@ def browser_checks() -> None:
 
         # Pro screen is visible, while paid features remain locked for Free users.
         page.locator("[data-page='pro']").click()
-        assert page.locator("#pageTitle").inner_text() == "Pro · API", "Pro navigation did not render its page heading"
+        assert page.locator("#pageTitle").inner_text() == "플랜", "Plan navigation did not render its page heading"
         assert page.locator("#proStatusBadge").inner_text() == "FREE", "Anonymous browser session should remain on the Free plan"
         assert page.locator("#generateAiPlan").is_disabled(), "AI study plan button should be disabled for Free users"
         assert page.locator("#monthlyPlanCard").get_by_text(re.compile(r"₩\s*4,900")).count() == 1, "Monthly plan price is missing or changed"
