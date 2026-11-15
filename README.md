@@ -36,7 +36,7 @@ python -m http.server 3000
 
 ## Vercel 설정
 
-Vercel 프로젝트의 Root Directory를 `STUDTY_TOOLS`로 지정하고 다음 환경변수를 설정합니다. 처음에는 Toss 테스트 키로 연동을 확인하세요.
+Vercel 프로젝트의 Root Directory는 비워 둡니다(저장소 루트가 곧 앱입니다). 다음 환경변수를 설정합니다. 처음에는 Toss 테스트 키로 연동을 확인하세요.
 
 `.env.example`를 참고합니다.
 
@@ -46,6 +46,7 @@ Vercel 프로젝트의 Root Directory를 `STUDTY_TOOLS`로 지정하고 다음 �
 - `TOSS_CLIENT_KEY` — 테스트 키는 `test_ck_`로 시작
 - `TOSS_SECRET_KEY` — 테스트 키는 `test_sk_`로 시작. 서버 함수 전용.
 - `INTEGRATION_ENCRYPTION_KEY` — 32바이트(64자리 hex) 암호화 키
+- `MASTER_GOOGLE_EMAIL` — (선택) 마스터 권한을 줄 Google 계정 이메일. 서버 전용.
 
 암호화 키 생성 예시:
 
@@ -61,7 +62,7 @@ Vercel의 Production / Preview / Development 환경에 필요한 값을 각각 �
 2. Authentication에서 Email 가입·로그인 정책과 이메일 인증 여부를 설정합니다.
 3. SQL Editor에서 `supabase/schema.sql`을 실행합니다.
 4. Project URL, anon key, service role key를 Vercel 환경변수에 등록합니다.
-5. Service Role Key는 서버 전용으로 유지합니다. 세 테이블에는 anon/authenticated용 RLS 정책을 추가하지 않았으며 서버에서 JWT 확인 후 Service Role로 접근합니다.
+5. Service Role Key는 서버 전용으로 유지합니다. 모든 테이블에는 anon/authenticated용 RLS 정책을 추가하지 않았으며 서버에서 JWT 확인 후 Service Role로 접근합니다.
 
 ## Toss Payments 준비
 

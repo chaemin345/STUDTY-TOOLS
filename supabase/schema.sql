@@ -46,7 +46,7 @@ create index if not exists api_credentials_user_idx on public.api_credentials(us
 -- Monthly AI assistant usage counters (one row per user/month).
 create table if not exists public.ai_usage (
   user_id uuid not null references auth.users(id) on delete cascade,
-  month text not null check (month ~ '^\\d{4}-\\d{2}$'),
+  month text not null check (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
   count integer not null default 0 check (count >= 0),
   primary key (user_id, month)
 );
@@ -55,15 +55,53 @@ create index if not exists ai_usage_user_month_idx on public.ai_usage(user_id, m
 
 -- Atomic monthly quota increment prevents parallel requests bypassing plan limits.
 create or replace function public.consume_ai_quota(p_user_id uuid, p_month text, p_limit integer)
-returns integer language plpgsql security definer set search_path = public as $$
-declare new_count integer;
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  new_count integer;
 begin
-  insert into public.ai_usage(user_id, month, count) values (p_user_id, p_month, 1)
-  on conflict (user_id, month) do update set count = public.ai_usage.count + 1
+  if p_user_id is null then
+    raise exception 'p_user_id is required';
+  end if;
+  if p_limit is null or p_limit < 1 then
+    raise exception 'p_limit must be a positive integer';
+  end if;
+  if p_month is null or p_month !~ '^[0-9]{4}-(0[1-9]|1[0-2])$' then
+    raise exception 'p_month must use YYYY-MM format';
+  end if;
+
+  insert into public.ai_usage(user_id, month, count)
+  values (p_user_id, p_month, 1)
+  on conflict (user_id, month)
+  do update set count = public.ai_usage.count + 1
   where public.ai_usage.count < p_limit
   returning count into new_count;
+
   return coalesce(new_count, 0);
 end;
 $$;
 revoke all on function public.consume_ai_quota(uuid, text, integer) from public, anon, authenticated;
 grant execute on function public.consume_ai_quota(uuid, text, integer) to service_role;
+
+-- Master/admin tables (server-only; no anon/authenticated policies).
+create table if not exists public.user_workspaces (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  workspace jsonb not null default '{}'::jsonb check (jsonb_typeof(workspace) = 'object'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.user_workspaces enable row level security;
+
+create table if not exists public.admin_audit_logs (
+  id bigint generated always as identity primary key,
+  actor_user_id uuid references auth.users(id),
+  actor_email text not null,
+  action text not null check (char_length(action) between 1 and 80),
+  target_user_id uuid references auth.users(id),
+  metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
+  created_at timestamptz not null default now()
+);
+alter table public.admin_audit_logs enable row level security;
