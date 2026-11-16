@@ -11,9 +11,13 @@ module.exports = async function handler(req, res) {
     const googleIdentity = Array.isArray(user.identities) && user.identities.some(identity => identity.provider === 'google');
     const verified = !!user.email_confirmed_at;
     const isMaster = !!masterEmail && googleIdentity && verified && String(user.email || '').toLowerCase() === masterEmail;
+    const publicUser = { id: user.id, email: user.email || null };
+    if (isMaster) {
+      return send(res, 200, { user: publicUser, role: 'master', subscription: null, plan: 'master' });
+    }
     const rows = await dbRequest(`subscriptions?user_id=eq.${encodeURIComponent(user.id)}&select=plan,status,starts_at,expires_at&limit=1`);
     const subscription = Array.isArray(rows) ? rows[0] || null : null;
     const active = !!subscription && subscription.status === 'active' && new Date(subscription.expires_at).getTime() > Date.now();
-    return send(res, 200, { user: { id: user.id, email: user.email || null }, role: isMaster ? 'master' : 'user', subscription: active ? subscription : null, plan: isMaster ? 'master' : active ? (String(subscription.plan).startsWith('max_') ? 'pro_max' : 'pro') : 'free' });
+    return send(res, 200, { user: publicUser, role: 'user', subscription: active ? subscription : null, plan: active ? (String(subscription.plan).startsWith('max_') ? 'pro_max' : 'pro') : 'free' });
   } catch (error) { return handleError(res, error); }
 };
