@@ -26,13 +26,23 @@ module.exports = async function handler(req, res) {
       try { payload = JSON.parse(raw); } catch { payload = raw.slice(0, 300); }
     }
     let redirectHost = null;
+    let googleClientIdPresent = false;
+    let googleCallbackHost = null;
     if (location) {
-      try { redirectHost = new URL(location).hostname; } catch {}
+      try {
+        const destination = new URL(location);
+        redirectHost = destination.hostname;
+        googleClientIdPresent = !!destination.searchParams.get('client_id');
+        const callback = destination.searchParams.get('redirect_uri');
+        if (callback) googleCallbackHost = new URL(callback).hostname;
+      } catch {}
     }
     return send(res, 200, {
-      ok: response.status >= 300 && response.status < 400 && redirectHost === 'accounts.google.com',
+      ok: response.status >= 300 && response.status < 400 && redirectHost === 'accounts.google.com' && googleClientIdPresent,
       supabaseStatus: response.status,
       redirectHost,
+      googleClientIdPresent,
+      googleCallbackHost,
       error: payload?.message || payload?.msg || (typeof payload === 'string' ? payload : null),
       redirectTo,
     });
