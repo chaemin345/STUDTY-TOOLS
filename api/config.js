@@ -1,9 +1,20 @@
 'use strict';
 
 const { send, methodNotAllowed } = require('../lib/server/http');
+const { isBackendEnabledForCurrentEnvironment } = require('../lib/server/runtime');
 
 module.exports = function handler(req, res) {
   if (req.method !== 'GET') return methodNotAllowed(res, ['GET']);
+
+  if (!isBackendEnabledForCurrentEnvironment()) {
+    return send(res, 200, {
+      supabaseUrl: null,
+      supabaseAnonKey: null,
+      integrationsReady: false,
+      backendDisabled: true,
+    });
+  }
+
   const publicKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
   const serviceKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   const hasSupabase = !!(process.env.SUPABASE_URL && publicKey && serviceKey);
@@ -12,5 +23,6 @@ module.exports = function handler(req, res) {
     supabaseUrl: process.env.SUPABASE_URL || null,
     supabaseAnonKey: publicKey || null,
     integrationsReady: hasSupabase && hasEncryption,
+    backendDisabled: false,
   });
 };
