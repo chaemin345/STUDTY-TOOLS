@@ -41,3 +41,14 @@ test('monthly quota fails closed when quota is exhausted or cannot be verified',
     error => error.status === 503
   );
 });
+
+
+test('all AI endpoints share the same atomic monthly quota service', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const endpoint of ['assistant.js', 'pattern-analysis.js', 'study-plan.js']) {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'ai', endpoint), 'utf8');
+    assert.match(source, /require\(['"]\.\.\/\.\.\/lib\/server\/quotas['"]\)/, endpoint + ' imports shared quota module');
+    assert.match(source, /consumeMonthlyAiQuota\(user, subscription, dbRequest\)/, endpoint + ' consumes shared quota');
+  }
+});
